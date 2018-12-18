@@ -76,6 +76,10 @@ module ActiveMerchant #:nodoc:
       end
 
       def authorize(money, payment, options = {})
+        if options[:execute_threed]
+          return process_3ds('authorize', money, payment, options)
+        end
+
         MultiResponse.run do |r|
           if payment.is_a?(ApplePayPaymentToken)
             r.process { tokenize_apple_pay_token(payment) }
@@ -104,6 +108,10 @@ module ActiveMerchant #:nodoc:
         if ach?(payment)
           direct_bank_error = 'Direct bank account transactions are not supported. Bank accounts must be stored and verified before use.'
           return Response.new(false, direct_bank_error)
+        end
+
+        if options[:execute_threed]
+          return process_3ds('purchase', money, payment, options)
         end
 
         MultiResponse.run do |r|
@@ -297,6 +305,36 @@ module ActiveMerchant #:nodoc:
         def type
           'stripe'
         end
+      end
+
+      def process_3ds(action, money, payment, options)
+        if(payment.kind_of?(String))
+          raise ArgumentError, '3DS transactions can not be done with tokenized cards'
+        else
+          post = {}
+          post[:type] = 'card'
+          add_creditcard(post, payment, options)
+          # Name is used in customer and not the card object
+          post[:card].delete(:name)
+          card_source = api_request(:post, 'sources', post)
+        end
+        if card_source['card']['three_d_secure'] == 'not_supported'
+          options.delete(:execute_threed)
+          self.public_send(action, money, card_source['id'], options)
+        else
+          post = {}
+          post[:type] = 'three_d_secure'
+          add_amount(post, money,  options, true)
+          post[:three_d_secure] = {card: card_source['id']}
+          post[:redirect] = {return_url: options[:callback_url]}
+          commit(:post, 'sources', post, options)
+        end
+      end
+
+      def create_source(money, payment, options)
+        post = {}
+        post[:type] = 'single_source'
+        add_amount(post, money, options, true)
       end
 
       def create_post_for_auth_or_purchase(money, payment, options)

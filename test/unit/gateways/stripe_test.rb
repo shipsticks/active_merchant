@@ -7,6 +7,8 @@ class StripeTest < Test::Unit::TestCase
     @gateway = StripeGateway.new(:login => 'login')
 
     @credit_card = credit_card()
+    @threeds_card = credit_card('4000000000003063')
+    @non_3ds_card = credit_card('378282246310005')
     @amount = 400
     @refund_amount = 200
 
@@ -14,6 +16,11 @@ class StripeTest < Test::Unit::TestCase
       :billing_address => address(),
       :statement_address => statement_address(),
       :description => 'Test Purchase'
+    }
+
+    @threeds_options = {
+      :execute_threed => true,
+      :callback_url => 'http://www.example.com/callback'
     }
 
     @apple_pay_payment_token = apple_pay_payment_token
@@ -1414,6 +1421,31 @@ class StripeTest < Test::Unit::TestCase
     @gateway.purchase(@amount, @credit_card, @options)
   end
 
+  def test_3ds_purchase
+    @gateway.expects(:ssl_request).twice.returns(threeds_first_sources_created_response, threeds_second_sources_created_response)
+    response = @gateway.purchase(@amount, @threeds_card, @options.merge(@threeds_options))
+    assert_success response
+    assert_equal 'source', response.params['object']
+    assert_equal 'pending', response.params['status']
+    assert_equal 'three_d_secure', response.params['type']
+    assert_equal false, response.params['three_d_secure']['authenticated']
+  end
+
+  def test_non3ds_purchase
+    @gateway.expects(:ssl_request).twice.returns(non_3ds_sources_create_response, non_3ds_purchase_response)
+    response = @gateway.purchase(@amount, @non_3ds_card, @options.merge(@threeds_options))
+    assert_equal 'charge', response.params['object']
+    assert_equal true, response.params['captured']
+  end
+
+  def test_3ds_with_tokenized_card
+    @gateway.expects(:ssl_request).twice.returns(successful_new_card_response, successful_new_customer_response)
+    assert response = @gateway.store(@token_string, :customer => 'cus_3sgheFxeBgTQ3M', :email => 'test@test.com')
+    assert_raise ArgumentError do
+      @gateway.purchase(@amount, response.authorization, @options.merge(@threeds_options))
+    end
+  end
+
   def test_verify_good_credentials
     @gateway.expects(:raw_ssl_request).returns(credentials_are_legit_response)
     assert @gateway.verify_credentials
@@ -2414,5 +2446,264 @@ class StripeTest < Test::Unit::TestCase
       'type' => 'card',
       'used' => false
     }
+  end
+
+  def threeds_first_sources_created_response
+    <<-RESPONSE
+      {
+        "id": "src_1Dj5lqAWOtgoysogqA4CJX9Y",
+        "object": "source",
+        "amount": null,
+        "card": {
+          "exp_month": 9,
+          "exp_year": 2019,
+          "brand": "Visa",
+          "country": "US",
+          "cvc_check": "unchecked",
+          "fingerprint": "53W491Mwz0OMuEJr",
+          "funding": "credit",
+          "last4": "3063",
+          "three_d_secure": "required",
+          "name": null,
+          "address_line1_check": null,
+          "address_zip_check": null,
+          "tokenization_method": null,
+          "dynamic_last4": null
+        },
+        "client_secret": "src_client_secret_EBShsJorDXd6WD521kRIQlbP",
+        "created": 1545228694,
+        "currency": null,
+        "flow": "none",
+        "livemode": false,
+        "metadata": {
+        },
+        "owner": {
+          "address": null,
+          "email": null,
+          "name": null,
+          "phone": null,
+          "verified_address": null,
+          "verified_email": null,
+          "verified_name": null,
+          "verified_phone": null
+        },
+        "statement_descriptor": null,
+        "status": "chargeable",
+        "type": "card",
+        "usage": "reusable"
+      }
+    RESPONSE
+  end
+
+  def threeds_second_sources_created_response
+    <<-RESPONSE
+      {
+        "id": "src_1Dj5lrAWOtgoysog910mc8oS",
+        "object": "source",
+        "amount": 100,
+        "client_secret": "src_client_secret_EBShU4HfxQAw2bVGMxvRECO1",
+        "created": 1545228695,
+        "currency": "usd",
+        "flow": "redirect",
+        "livemode": false,
+        "metadata": {
+        },
+        "owner": {
+          "address": {
+            "city": null,
+            "country": null,
+            "line1": "",
+            "line2": null,
+            "postal_code": null,
+            "state": null
+          },
+          "email": null,
+          "name": null,
+          "phone": null,
+          "verified_address": null,
+          "verified_email": null,
+          "verified_name": null,
+          "verified_phone": null
+        },
+        "redirect": {
+          "failure_reason": null,
+          "return_url": "http://www.example.com/callback",
+          "status": "pending",
+          "url": "https://hooks.stripe.com/redirect/authenticate/src_1Dj5lrAWOtgoysog910mc8oS?client_secret=src_client_secret_EBShU4HfxQAw2bVGMxvRECO1"
+        },
+        "statement_descriptor": null,
+        "status": "pending",
+        "three_d_secure": {
+          "card": "src_1Dj5lqAWOtgoysogqA4CJX9Y",
+          "brand": "Visa",
+          "country": "US",
+          "cvc_check": "unchecked",
+          "exp_month": 9,
+          "exp_year": 2019,
+          "fingerprint": "53W491Mwz0OMuEJr",
+          "funding": "credit",
+          "last4": "3063",
+          "three_d_secure": "required",
+          "customer": null,
+          "authenticated": false,
+          "name": null,
+          "address_line1_check": null,
+          "address_zip_check": null,
+          "tokenization_method": null,
+          "dynamic_last4": null
+        },
+        "type": "three_d_secure",
+        "usage": "single_use"
+      }
+    RESPONSE
+  end
+
+  def non_3ds_sources_create_response
+    <<-RESPONSE
+      {
+        "id": "src_1Dj5yAAWOtgoysogPB6hwOa1",
+        "object": "source",
+        "amount": null,
+        "card": {
+          "exp_month": 9,
+          "exp_year": 2019,
+          "brand": "American Express",
+          "country": "US",
+          "cvc_check": "unchecked",
+          "fingerprint": "DjZpoV89lmOMsJLF",
+          "funding": "credit",
+          "last4": "0005",
+          "three_d_secure": "not_supported",
+          "name": null,
+          "address_line1_check": null,
+          "address_zip_check": null,
+          "tokenization_method": null,
+          "dynamic_last4": null
+        },
+        "client_secret": "src_client_secret_EBStgH6cBMsODApAChcj9Kkq",
+        "created": 1545229458,
+        "currency": null,
+        "flow": "none",
+        "livemode": false,
+        "metadata": {
+        },
+        "owner": {
+          "address": null,
+          "email": null,
+          "name": null,
+          "phone": null,
+          "verified_address": null,
+          "verified_email": null,
+          "verified_name": null,
+          "verified_phone": null
+        },
+        "statement_descriptor": null,
+        "status": "chargeable",
+        "type": "card",
+        "usage": "reusable"
+      }
+    RESPONSE
+  end
+
+  def non_3ds_purchase_response
+    <<-RESPONSE
+      {
+        "id": "ch_1Dj5yBAWOtgoysogcxYBTKE1",
+        "object": "charge",
+        "amount": 100,
+        "amount_refunded": 0,
+        "application": null,
+        "application_fee": null,
+        "balance_transaction": "txn_1Dj5yBAWOtgoysogWsXSsdW6",
+        "captured": true,
+        "created": 1545229459,
+        "currency": "usd",
+        "customer": null,
+        "description": "ActiveMerchant Test Purchase",
+        "destination": null,
+        "dispute": null,
+        "failure_code": null,
+        "failure_message": null,
+        "fraud_details": {
+        },
+        "invoice": null,
+        "livemode": false,
+        "metadata": {
+          "email": "wow@example.com"
+        },
+        "on_behalf_of": null,
+        "order": null,
+        "outcome": {
+          "network_status": "approved_by_network",
+          "reason": null,
+          "risk_level": "normal",
+          "risk_score": 38,
+          "seller_message": "Payment complete.",
+          "type": "authorized"
+        },
+        "paid": true,
+        "payment_intent": null,
+        "receipt_email": null,
+        "receipt_number": null,
+        "refunded": false,
+        "refunds": {
+          "object": "list",
+          "data": [
+
+          ],
+          "has_more": false,
+          "total_count": 0,
+          "url": "/v1/charges/ch_1Dj5yBAWOtgoysogcxYBTKE1/refunds"
+        },
+        "review": null,
+        "shipping": null,
+        "source": {
+          "id": "src_1Dj5yAAWOtgoysogPB6hwOa1",
+          "object": "source",
+          "amount": null,
+          "card": {
+            "exp_month": 9,
+            "exp_year": 2019,
+            "brand": "American Express",
+            "country": "US",
+            "cvc_check": "pass",
+            "fingerprint": "DjZpoV89lmOMsJLF",
+            "funding": "credit",
+            "last4": "0005",
+            "three_d_secure": "not_supported",
+            "name": null,
+            "address_line1_check": null,
+            "address_zip_check": null,
+            "tokenization_method": null,
+            "dynamic_last4": null
+          },
+          "client_secret": "src_client_secret_EBStgH6cBMsODApAChcj9Kkq",
+          "created": 1545229459,
+          "currency": null,
+          "flow": "none",
+          "livemode": false,
+          "metadata": {
+          },
+          "owner": {
+            "address": null,
+            "email": null,
+            "name": null,
+            "phone": null,
+            "verified_address": null,
+            "verified_email": null,
+            "verified_name": null,
+            "verified_phone": null
+          },
+          "statement_descriptor": null,
+          "status": "consumed",
+          "type": "card",
+          "usage": "reusable"
+        },
+        "source_transfer": null,
+        "statement_descriptor": null,
+        "status": "succeeded",
+        "transfer_group": null
+      }
+    RESPONSE
   end
 end
