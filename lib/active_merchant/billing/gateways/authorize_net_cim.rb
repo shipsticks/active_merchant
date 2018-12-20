@@ -762,7 +762,7 @@ module ActiveMerchant #:nodoc:
             add_credit_card(xml, payment_profile[:payment][:credit_card]) if payment_profile[:payment].has_key?(:credit_card)
             add_bank_account(xml, payment_profile[:payment][:bank_account]) if payment_profile[:payment].has_key?(:bank_account)
             add_drivers_license(xml, payment_profile[:payment][:drivers_license]) if payment_profile[:payment].has_key?(:drivers_license)
-            add_acceptjs(xml, payment_profile[:payment][:acceptjs]) if payment_profile[:payment].has_key?(:acceptjs)
+            add_opaque_data(xml, payment_profile[:payment][:opaque_data]) if payment_profile[:payment].has_key?(:opaque_data)
             # This element is only required for Wells Fargo SecureSource eCheck.Net merchants
             # The customer's Social Security Number or Tax ID
             xml.tag!('taxId', payment_profile[:payment]) if payment_profile[:payment].has_key?(:tax_id)
@@ -772,13 +772,17 @@ module ActiveMerchant #:nodoc:
         xml.tag!('customerPaymentProfileId', payment_profile[:customer_payment_profile_id]) if payment_profile[:customer_payment_profile_id]
       end
 
-      def add_acceptjs(xml, data_value)
-        return unless data_value
+      # Authorize.net accept SDKs
+      def add_opaque_data(xml, opaque_data)
+        return unless opaque_data
         xml.tag!('opaqueData') do
-          # The credit card number used for payment of the subscription
-          xml.tag!('dataDescriptor', "COMMON.ACCEPT.INAPP.PAYMENT")
-          # The expiration date of the credit card used for the subscription
-          xml.tag!('dataValue', data_value[:data_value])
+          # Possible values for dataDescriptor:
+          # COMMON.ACCEPT.INAPP.PAYMENT
+          # COMMON.APPLE.INAPP.PAYMENT
+          # COMMON.ANDROID.INAPP.PAYMENT
+          xml.tag!('dataDescriptor', opaque_data[:data_descriptor])
+          # The payment method nonce
+          xml.tag!('dataValue', opaque_data[:data_value])
         end
       end
 
